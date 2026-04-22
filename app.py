@@ -1,8 +1,10 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import joblib
 import json
 import time
+import math
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -220,60 +222,88 @@ def badge_row():
 
 
 def arc_gauge(prob: float):
-    """SVG semicircular arc gauge."""
+    """
+    Renders the arc gauge inside a components.html() iframe — the only way
+    to guarantee SVG renders correctly in Streamlit (st.markdown strips SVG).
+    """
     pct   = max(0.0, min(1.0, prob))
-    angle = pct * 180          # 0 → 180 degrees
+    angle = pct * 180
     r, cx, cy = 90, 110, 110
 
     def to_xy(deg):
-        import math
         rad = math.radians(deg - 180)
         return cx + r * math.cos(rad), cy + r * math.sin(rad)
 
-    ex, ey   = to_xy(angle)
-    large    = 1 if angle > 180 else 0
-    color    = "#FF3B5C" if pct > 0.6 else ("#FFB800" if pct > 0.4 else "#00FFB2")
-    glow     = color
+    ex, ey = to_xy(angle)
+    large  = 1 if angle > 180 else 0
+    color  = "#FF3B5C" if pct > 0.6 else ("#FFB800" if pct > 0.4 else "#00FFB2")
 
-    # dot markers at 0%, 40%, 60%, 100%
-    dots = ""
+    dots_svg = ""
     for t, dc in [(0, "#00FFB2"), (0.4, "#FFB800"), (0.6, "#FFB800"), (1.0, "#FF3B5C")]:
         dx, dy = to_xy(t * 180)
-        dots += f'<circle cx="{dx:.1f}" cy="{dy:.1f}" r="2.5" fill="{dc}" opacity="0.6"/>'
+        dots_svg += f'<circle cx="{dx:.1f}" cy="{dy:.1f}" r="3" fill="{dc}" opacity="0.7"/>\n'
 
-    arc_path = (f'M 20 110 A 90 90 0 {large} 1 {ex:.2f} {ey:.2f}'
-                if pct > 0.001 else "")
+    arc_path_d = f"M 20 110 A 90 90 0 {large} 1 {ex:.2f} {ey:.2f}" if pct > 0.001 else ""
+    arc_el = (
+        f'<path d="{arc_path_d}" fill="none" stroke="{color}" stroke-width="12" '
+        f'stroke-linecap="round" filter="url(#glow)"/>'
+        if arc_path_d else ""
+    )
 
-    st.markdown(f"""
-    <div style="text-align:center; padding:28px 16px 8px;">
-      <p style="font-family:'DM Mono',monospace; font-size:10px; letter-spacing:3px;
-        text-transform:uppercase; color:#5A7A9A; margin-bottom:16px;">
-        Probability of Default</p>
-      <div style="position:relative; width:220px; height:130px; margin:0 auto;">
-        <svg width="220" height="120" viewBox="0 0 220 120" overflow="visible">
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <link href="https://fonts.googleapis.com/css2?family=Syne:wght@800&family=DM+Mono:wght@400&display=swap" rel="stylesheet">
+      <style>
+        * {{ margin:0; padding:0; box-sizing:border-box; }}
+        body {{ background:#080F1A; display:flex; flex-direction:column;
+                align-items:center; justify-content:center;
+                height:240px; overflow:hidden; }}
+        .label {{ font-family:'DM Mono',monospace; font-size:10px;
+                  letter-spacing:3px; text-transform:uppercase;
+                  color:#5A7A9A; margin-bottom:14px; }}
+        .sub   {{ font-family:'DM Mono',monospace; font-size:11px;
+                  letter-spacing:1px; color:#5A7A9A; margin-top:10px; }}
+        .gauge-wrap {{ position:relative; width:220px; height:120px; }}
+        .big-num {{
+          position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+          font-family:'Syne',sans-serif; font-size:46px; font-weight:800;
+          color:{color}; line-height:1; white-space:nowrap;
+          text-shadow: 0 0 20px {color}66;
+        }}
+        .pct-unit {{ font-size:20px; color:#5A7A9A; font-weight:400; }}
+      </style>
+    </head>
+    <body>
+      <p class="label">Probability of Default</p>
+      <div class="gauge-wrap">
+        <svg width="220" height="120" viewBox="0 0 220 120" style="overflow:visible">
+          <defs>
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="4" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
           <!-- track -->
           <path d="M 20 110 A 90 90 0 0 1 200 110"
             fill="none" stroke="#0D1826" stroke-width="12" stroke-linecap="round"/>
           <!-- filled arc -->
-          {"" if not arc_path else f'''
-          <path d="{arc_path}"
-            fill="none" stroke="{color}" stroke-width="12" stroke-linecap="round"
-            style="filter:drop-shadow(0 0 8px {glow})"/>'''}
-          <!-- needle dot -->
-          <circle cx="{ex:.2f}" cy="{ey:.2f}" r="6" fill="{color}"
-            style="filter:drop-shadow(0 0 12px {glow})"/>
-          {dots}
+          {arc_el}
+          <!-- needle tip -->
+          <circle cx="{ex:.2f}" cy="{ey:.2f}" r="7" fill="{color}" filter="url(#glow)"/>
+          <!-- zone markers -->
+          {dots_svg}
         </svg>
-        <!-- big number -->
-        <div style="position:absolute; bottom:8px; left:50%; transform:translateX(-50%);
-          font-family:'Syne',sans-serif; font-size:44px; font-weight:800;
-          color:{color}; line-height:1; white-space:nowrap;">
-          {pct*100:.1f}<span style="font-size:18px; color:#5A7A9A;">%</span>
+        <div class="big-num">
+          {pct*100:.1f}<span class="pct-unit">%</span>
         </div>
       </div>
-      <p style="font-family:'DM Mono',monospace; font-size:12px;
-        color:#5A7A9A; margin-top:8px; letter-spacing:1px;">Default Probability Score</p>
-    </div>""", unsafe_allow_html=True)
+      <p class="sub">Default Probability Score</p>
+    </body>
+    </html>
+    """
+    components.html(html, height=240)
 
 
 def status_card(level: str, prob: float):
@@ -489,15 +519,8 @@ if assess:
     st.markdown("<br>", unsafe_allow_html=True)
     section_label("02", "Risk Assessment")
 
-    # Arc gauge inside a surface card
-    st.markdown("""
-    <div style="background:#080F1A; border:1px solid rgba(0,200,255,0.12);
-      border-radius:16px; overflow:hidden; margin-bottom:16px; position:relative;">
-      <div style="position:absolute;top:0;left:0;right:0;height:1px;
-        background:linear-gradient(90deg,transparent,#00C8FF,transparent);opacity:0.3;"></div>
-    """, unsafe_allow_html=True)
+    # Arc gauge — rendered in sandboxed iframe (components.html handles SVG safely)
     arc_gauge(prob)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     # Probability metric row
     m1, m2, m3 = st.columns(3)
